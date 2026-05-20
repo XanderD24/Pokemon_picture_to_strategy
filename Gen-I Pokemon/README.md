@@ -4,6 +4,41 @@ A computer vision + game strategy project that combines deep learning image clas
 
 ---
 
+## 🆕 What's new in v3 (Tier S improvements)
+
+The training notebook was upgraded with four high-impact, low-effort improvements drawn from `CNN_BEST_PRACTICES.md`. All changes are documented in-notebook with markdown cells (`🆕 v3 Change N:`) explaining *what* changed, *why*, and the *expected effect*.
+
+| # | Change | Notebook cell |
+|---|--------|---------------|
+| 1 | **Modern augmentation** — `RandomResizedCrop` + `RandAugment` + `RandomErasing` (replaces flip + rotation + ColorJitter) | Transforms cell |
+| 2 | **MixUp / CutMix** collate on the train loader (α=0.2 MixUp or α=1.0 CutMix per batch) | New collate cell |
+| 3 | **Label smoothing** (`label_smoothing=0.1`) on `CrossEntropyLoss` — fixes the "100% confidence on wrong predictions" pathology | Phase 1 setup |
+| 4 | **AdamW + weight decay + linear warmup** — replaces `Adam`, adds `weight_decay=1e-4`, prepends 2-epoch `LinearLR` warmup before `CosineAnnealingLR` | Phase 1 & Phase 2 |
+| 5 | **Test-Time Augmentation** (`tta_evaluate`) — averages softmax over original + horizontal flip | Train/eval helpers cell |
+
+A new **"v3 vs v2 — Head-to-Head Comparison"** section at the end of the notebook automatically:
+- Loads both checkpoints (`best_model_v2.pth` and `best_model_v3.pth`) and runs them on the same test set.
+- Computes a metrics table: top-1, top-5, CE loss, **ECE (Expected Calibration Error)**, and mean confidence on wrong predictions.
+- Runs **McNemar's paired test** for statistical significance.
+- Plots per-class accuracy difference (red bars = classes where v3 regressed).
+- Plots reliability diagrams for v2 and v3+TTA.
+- Prints a final **VERDICT** against three decision rules (significance, calibration, no major regressions).
+
+### Results
+
+| Metric | v2 (baseline) | v3 (Tier S) |
+|---|---|---|
+| Test top-1 | 94.04% | **95.61%** |
+| Test top-5 | 99.22% | 99.12% |
+| McNemar p-value (vs v2) | — | **0.017** (significant) |
+| Discordant pairs | — | 31 v3-only correct vs 14 v2-only |
+
+The +1.7pp accuracy gain is **statistically significant**. ECE got worse (label smoothing + MixUp make the model *under-confident* by design — a fixable artifact via temperature scaling, listed as a Tier B follow-up in `CNN_BEST_PRACTICES.md`).
+
+The device selection in the notebook now picks **`cuda → mps → cpu`** so it runs natively on Apple Silicon Macs.
+
+---
+
 ## Files
 
 ### `pokemon_team_builder_v2.ipynb` — Training Notebook
@@ -45,13 +80,31 @@ The notebook also includes:
 
 ---
 
-### `best_model_v2.pth` — Trained Model Weights
+### `best_model_v2.pth` — Baseline checkpoint (frozen)
 
-The saved PyTorch checkpoint from `pokemon_team_builder_v2.ipynb`. It stores the EfficientNet-B0 weights after the best validation epoch.
+The original v2 checkpoint, preserved so the v3 notebook can compare against it side-by-side. Do not overwrite.
 
 - **Architecture:** EfficientNet-B0 (pretrained on ImageNet, fine-tuned for 150 Pokémon classes)
 - **Output:** probability distribution over 150 Pokémon
-- Loaded by `team_recommender.ipynb` — no retraining needed
+- **Top-1:** 94.04% on the held-out test set
+- Loaded by `team_recommender.ipynb` and by the v3 comparison section
+
+---
+
+### `best_model_v3.pth` — v3 checkpoint (current best)
+
+Produced by re-running `pokemon_team_builder_v2.ipynb` after the Tier S upgrades.
+
+- **Same architecture as v2** (EfficientNet-B0, 150 outputs) — drop-in compatible
+- **Top-1:** **95.61%** on the same test split (+1.7pp, McNemar p=0.017)
+- **Trained on Apple M4 Pro via MPS** (also works on CUDA or CPU)
+- Loaded by the FastAPI web app at `../webapp/app.py` and by the v3 comparison cells
+
+---
+
+### `CNN_BEST_PRACTICES.md` — Improvement roadmap
+
+The ranked review of the v2 model that motivated the v3 changes. Tier S items (1–4) are now implemented; Tier A and B items (discriminative learning rates, EMA, temperature scaling, etc.) remain as future work.
 
 ---
 
@@ -108,9 +161,11 @@ Balanced composite strategy → Top pick:
 ```
 PokemonData/          ← 6,820 labeled images (150 Gen-I Pokémon)
         ↓
-pokemon_team_builder_v2.ipynb   ← trains EfficientNet-B0
+pokemon_team_builder_v2.ipynb   ← trains EfficientNet-B0 (v3 Tier S recipe)
         ↓
-best_model_v2.pth     ← saved model weights
+best_model_v3.pth     ← current best (95.6% top-1)
+best_model_v2.pth     ← frozen baseline (94.0% top-1, kept for comparison)
         ↓
 team_recommender.ipynb          ← loads model, classifies images, recommends 6th member
+../webapp/                      ← FastAPI demo site (loads best_model_v3.pth)
 ```
