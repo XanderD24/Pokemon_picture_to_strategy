@@ -1,0 +1,367 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Pokémon Classifier</title>
+<style>
+  :root {
+    --red:#ee1515;
+    --red-dark:#c40c0c;
+    --yellow:#ffcb05;
+    --navy:#1a1a2e;
+    --ink:#2b2b3d;
+    --muted:#7a7a8c;
+    --card:#ffffff;
+    --bg-1:#fffdf7;
+    --bg-2:#fef3e0;
+    --border:#e8e2d5;
+    --green:#10b981;
+    --amber:#f59e0b;
+    --rose:#ef4444;
+    --shadow: 0 6px 24px rgba(26,26,46,.08);
+    --shadow-lg: 0 12px 40px rgba(26,26,46,.14);
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;padding:0}
+  body{
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, system-ui, sans-serif;
+    color: var(--ink);
+    background:
+      radial-gradient(circle at 10% 0%, #fff5cc 0%, transparent 45%),
+      radial-gradient(circle at 95% 10%, #ffe1e1 0%, transparent 40%),
+      linear-gradient(180deg, var(--bg-1) 0%, var(--bg-2) 100%);
+    min-height:100vh;
+    padding: 32px 20px 80px;
+  }
+  main { max-width: 1100px; margin: 0 auto; }
+
+  /* ---------- Header ---------- */
+  header { display:flex; align-items:center; gap:18px; margin-bottom: 28px; }
+  .ball {
+    width:56px; height:56px; border-radius:50%;
+    background: linear-gradient(180deg, var(--red) 0 50%, #fff 50% 100%);
+    border: 4px solid var(--navy);
+    position:relative; flex-shrink:0;
+    box-shadow: 0 4px 12px rgba(0,0,0,.15);
+  }
+  .ball::before {
+    content:''; position:absolute; left:-4px; right:-4px; top: calc(50% - 3px);
+    height: 6px; background: var(--navy);
+  }
+  .ball::after {
+    content:''; position:absolute; left:50%; top:50%;
+    width:18px; height:18px; border-radius:50%;
+    background:#fff; border:4px solid var(--navy);
+    transform:translate(-50%,-50%);
+  }
+  h1 {
+    margin:0; font-size: 32px; font-weight: 800; letter-spacing: -0.5px;
+    color: var(--navy);
+  }
+  .tag {
+    display:inline-block; margin-top:4px;
+    font-size: 13px; font-weight:600; color:#fff;
+    background: var(--navy); padding: 3px 10px; border-radius:999px;
+  }
+  .sub { color: var(--muted); font-size: 14px; margin-top: 6px; }
+
+  /* ---------- Drop zone ---------- */
+  .drop {
+    display: block;
+    border: 3px dashed #d8c98a;
+    border-radius: 18px;
+    padding: 44px 24px;
+    text-align: center;
+    background: #fffdf3;
+    cursor: pointer;
+    transition: border-color .2s, background .2s, transform .2s;
+    box-shadow: var(--shadow);
+  }
+  .drop:hover { border-color: var(--red); background:#fffafa; }
+  .drop.dragover {
+    border-color: var(--red); background:#fff0f0;
+    transform: scale(1.01);
+  }
+  .drop svg { width: 56px; height: 56px; color: var(--red); margin-bottom: 8px; }
+  .drop .big { font-size: 18px; font-weight: 700; color: var(--navy); }
+  .drop .small { color: var(--muted); font-size: 14px; margin-top: 4px; }
+
+  /* ---------- Action bar ---------- */
+  .controls {
+    display:flex; gap:12px; align-items:center;
+    margin: 20px 0 8px; flex-wrap: wrap;
+  }
+  button {
+    font-family: inherit; font-size: 15px; font-weight: 600;
+    border:0; border-radius: 10px; padding: 11px 22px; cursor: pointer;
+    transition: transform .1s, box-shadow .2s, background .2s;
+    display: inline-flex; align-items: center; gap: 8px;
+  }
+  button:active { transform: translateY(1px); }
+  button.primary {
+    background: var(--red); color:#fff;
+    box-shadow: 0 4px 14px rgba(238,21,21,.3);
+  }
+  button.primary:hover:not(:disabled) { background: var(--red-dark); }
+  button.primary:disabled { background:#d8d4cc; box-shadow:none; cursor:not-allowed; color:#fff; }
+  button.secondary {
+    background:#fff; color: var(--navy); border: 2px solid var(--border);
+  }
+  button.secondary:hover:not(:disabled) { border-color: var(--navy); }
+  button.secondary:disabled { opacity:.4; cursor:not-allowed; }
+  .info { color: var(--muted); font-size: 14px; margin-left: auto; }
+
+  /* spinner inside button */
+  .spinner {
+    width:14px; height:14px; border:2px solid rgba(255,255,255,.4);
+    border-top-color:#fff; border-radius:50%; animation: spin .8s linear infinite;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  /* ---------- Error banner ---------- */
+  .err {
+    display:none; background:#fee2e2; color:#991b1b;
+    border-left: 4px solid var(--rose);
+    padding: 10px 14px; border-radius: 8px;
+    font-size: 14px; margin-top: 8px;
+  }
+  .err.show { display:block; }
+
+  /* ---------- Empty state ---------- */
+  .empty {
+    text-align:center; padding: 60px 20px; color: var(--muted);
+    font-size: 15px;
+  }
+  .empty .ball {
+    width: 40px; height: 40px; border-width: 3px; margin: 0 auto 12px;
+    opacity: .5;
+  }
+  .empty .ball::after { width:14px; height:14px; border-width:3px; }
+  .empty .ball::before { top: calc(50% - 2px); height:4px; }
+
+  /* ---------- Result grid ---------- */
+  .grid {
+    display:grid;
+    grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
+    gap: 18px; margin-top: 22px;
+  }
+  .grid.loading { opacity: .45; pointer-events:none; transition: opacity .2s; }
+  .card {
+    background: var(--card); border-radius: 16px; padding: 16px;
+    box-shadow: var(--shadow);
+    transition: transform .2s, box-shadow .2s;
+    animation: fadeIn .35s ease both;
+  }
+  .card:hover { transform: translateY(-3px); box-shadow: var(--shadow-lg); }
+  @keyframes fadeIn { from { opacity:0; transform: translateY(8px);} to {opacity:1; transform:none;} }
+
+  .thumb-wrap {
+    position:relative; border-radius: 12px; overflow:hidden;
+    background:#f3efe4;
+    aspect-ratio: 1;
+  }
+  .thumb { width:100%; height:100%; object-fit: cover; display:block; }
+  .badge {
+    position:absolute; top:10px; right:10px;
+    background: var(--green); color:#fff;
+    font-size: 12px; font-weight: 700; padding: 4px 10px;
+    border-radius: 999px;
+    box-shadow: 0 2px 8px rgba(0,0,0,.2);
+  }
+
+  .pred {
+    margin: 12px 2px 4px;
+    font-size: 18px; font-weight: 700; color: var(--navy);
+  }
+  .pred .pct { color: var(--muted); font-weight:600; font-size: 15px; }
+
+  .top3 { margin-top: 8px; }
+  .row {
+    display:flex; justify-content: space-between;
+    font-size: 13px; color: #555; margin-top: 6px;
+  }
+  .row .num { font-variant-numeric: tabular-nums; color: var(--muted); }
+  .bar {
+    height:7px; background: #f1ede1; border-radius: 4px;
+    overflow:hidden; margin-top: 3px;
+  }
+  .bar > div { height:100%; border-radius: 4px; transition: width .4s ease; }
+
+  .waiting { color: #b5af9e; font-style: italic; }
+
+  footer {
+    text-align:center; color: var(--muted); font-size: 12px;
+    margin-top: 50px;
+  }
+</style>
+</head>
+<body>
+<main>
+
+  <header>
+    <div class="ball" aria-hidden="true"></div>
+    <div>
+      <h1>Pokémon Classifier</h1>
+      <div class="sub">
+        EfficientNet-B0 fine-tuned on Gen-I Pokémon
+        &nbsp;·&nbsp; <span class="tag">95.6% top-1</span>
+      </div>
+    </div>
+  </header>
+
+  <label class="drop" id="drop">
+    <input id="file" type="file" accept="image/*" multiple hidden>
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+         stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+      <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+      <polyline points="17 8 12 3 7 8"/>
+      <line x1="12" y1="3" x2="12" y2="15"/>
+    </svg>
+    <div class="big">Click to choose, or drag &amp; drop</div>
+    <div class="small">Up to 5 Pokémon images · PNG / JPG / WebP</div>
+  </label>
+
+  <div class="controls">
+    <button id="go" class="primary" disabled>
+      <span id="goLabel">Classify</span>
+    </button>
+    <button id="clear" class="secondary" disabled>Clear</button>
+    <span class="info" id="count">0 files selected</span>
+  </div>
+  <div class="err" id="err"></div>
+
+  <div class="grid" id="grid">
+    <div class="empty" id="empty">
+      <div class="ball" aria-hidden="true"></div>
+      <div>Pick some Pokémon images to get started.</div>
+    </div>
+  </div>
+
+  <footer>Running locally · model: best_model_v3.pth</footer>
+</main>
+
+<script>
+const drop    = document.getElementById('drop');
+const fileEl  = document.getElementById('file');
+const goBtn   = document.getElementById('go');
+const goLabel = document.getElementById('goLabel');
+const clearBtn= document.getElementById('clear');
+const countEl = document.getElementById('count');
+const grid    = document.getElementById('grid');
+const errEl   = document.getElementById('err');
+const MAX     = 5;
+let files = [];
+
+const confColor = p => p >= 0.8 ? 'var(--green)' : p >= 0.5 ? 'var(--amber)' : 'var(--rose)';
+
+function showError(msg) {
+  errEl.textContent = msg;
+  errEl.classList.toggle('show', !!msg);
+}
+
+function renderEmpty() {
+  grid.innerHTML = `
+    <div class="empty">
+      <div class="ball" aria-hidden="true"></div>
+      <div>Pick some Pokémon images to get started.</div>
+    </div>`;
+}
+
+function setFiles(list) {
+  const arr = Array.from(list).filter(f => f.type.startsWith('image/'));
+  files = arr.slice(0, MAX);
+  countEl.textContent = `${files.length} file${files.length===1?'':'s'} selected`;
+  goBtn.disabled = files.length === 0;
+  clearBtn.disabled = files.length === 0;
+  showError(arr.length > MAX ? `Only the first ${MAX} images will be used.` : '');
+  renderPreviews();
+}
+
+function renderPreviews() {
+  if (!files.length) { renderEmpty(); return; }
+  grid.innerHTML = '';
+  files.forEach(f => {
+    const card = document.createElement('div'); card.className = 'card';
+    card.innerHTML = `
+      <div class="thumb-wrap">
+        <img class="thumb" alt="${f.name}" src="${URL.createObjectURL(f)}">
+      </div>
+      <div class="pred waiting">— waiting —</div>
+    `;
+    grid.appendChild(card);
+  });
+}
+
+drop.addEventListener('click', () => fileEl.click());
+fileEl.addEventListener('change', e => setFiles(e.target.files));
+['dragenter','dragover'].forEach(ev => drop.addEventListener(ev, e => {
+  e.preventDefault(); drop.classList.add('dragover');
+}));
+['dragleave','drop'].forEach(ev => drop.addEventListener(ev, e => {
+  e.preventDefault(); drop.classList.remove('dragover');
+}));
+drop.addEventListener('drop', e => setFiles(e.dataTransfer.files));
+
+clearBtn.addEventListener('click', () => {
+  files = []; fileEl.value = '';
+  countEl.textContent = '0 files selected';
+  goBtn.disabled = true; clearBtn.disabled = true;
+  showError('');
+  renderEmpty();
+});
+
+goBtn.addEventListener('click', async () => {
+  goBtn.disabled = true; clearBtn.disabled = true;
+  grid.classList.add('loading');
+  goLabel.innerHTML = '<span class="spinner"></span> Classifying…';
+  showError('');
+
+  const fd = new FormData();
+  files.forEach(f => fd.append('files', f));
+
+  try {
+    const res = await fetch('/predict', { method: 'POST', body: fd });
+    if (!res.ok) {
+      const j = await res.json().catch(() => ({}));
+      showError(j.detail || `Server error (HTTP ${res.status})`);
+      return;
+    }
+    const data = await res.json();
+    renderResults(data.results);
+  } catch (err) {
+    showError('Network error: ' + err.message);
+  } finally {
+    goLabel.textContent = 'Classify';
+    grid.classList.remove('loading');
+    goBtn.disabled = files.length === 0;
+    clearBtn.disabled = files.length === 0;
+  }
+});
+
+function renderResults(results) {
+  grid.innerHTML = '';
+  results.forEach((r, idx) => {
+    const top1 = r.top3[0];
+    const badgeColor = confColor(top1.confidence);
+    const card = document.createElement('div'); card.className = 'card';
+
+    const top3Html = r.top3.map(p => `
+      <div class="row"><span>${p.name}</span><span class="num">${(p.confidence*100).toFixed(1)}%</span></div>
+      <div class="bar"><div style="width:${(p.confidence*100).toFixed(1)}%; background:${confColor(p.confidence)}"></div></div>
+    `).join('');
+
+    card.innerHTML = `
+      <div class="thumb-wrap">
+        <img class="thumb" alt="${r.filename}" src="${URL.createObjectURL(files[idx])}">
+        <span class="badge" style="background:${badgeColor}">${(top1.confidence*100).toFixed(0)}%</span>
+      </div>
+      <div class="pred">${top1.name} <span class="pct">— top-1</span></div>
+      <div class="top3">${top3Html}</div>
+    `;
+    grid.appendChild(card);
+  });
+}
+</script>
+</body>
+</html>
