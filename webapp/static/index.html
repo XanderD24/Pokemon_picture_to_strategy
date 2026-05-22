@@ -194,6 +194,69 @@
     text-align:center; color: var(--muted); font-size: 12px;
     margin-top: 50px;
   }
+
+  /* ---------- Camera panel ---------- */
+  .or-row {
+    display:flex; align-items:center; gap:12px;
+    margin: 14px 0 0;
+  }
+  .or-row .line { flex:1; height:1px; background: var(--border); }
+  .or-row .or { color: var(--muted); font-size:12px; font-weight:600; letter-spacing:1px; }
+
+  .cam-launch {
+    display:flex; justify-content:center; margin-top: 10px;
+  }
+  .cam-panel {
+    display:none;
+    margin-top: 16px; padding: 16px;
+    background: #fff; border-radius: 16px;
+    box-shadow: var(--shadow);
+    border: 2px solid var(--border);
+  }
+  .cam-panel.show { display:block; }
+  .cam-panel video {
+    width: 100%; max-height: 420px; border-radius: 12px;
+    background: #000; display:block;
+  }
+  .cam-actions {
+    display:flex; gap:10px; margin-top: 12px; flex-wrap: wrap;
+    align-items:center;
+  }
+  .cam-actions .info { margin-left:auto; }
+
+  /* ---------- Add-more tile ---------- */
+  .add-card {
+    position: relative;
+    display:flex; align-items:center; justify-content:center;
+    min-height: 250px;
+    background: #fffdf3;
+    border: 3px dashed #d8c98a;
+    box-shadow: none;
+    cursor: pointer;
+    transition: border-color .2s, background .2s;
+  }
+  .add-card:hover { border-color: var(--red); background:#fffafa; }
+  .add-btn {
+    background: transparent; border: 0; cursor: pointer;
+    font-size: 56px; font-weight: 300; color: var(--red);
+    line-height: 1; padding: 0;
+  }
+  .add-menu {
+    position: absolute; top: 50%; left: 50%;
+    transform: translate(-50%, -50%);
+    background: #fff; border-radius: 12px;
+    box-shadow: var(--shadow-lg);
+    padding: 8px; display:flex; flex-direction:column; gap:6px;
+    z-index: 10; min-width: 180px;
+  }
+  .add-menu[hidden] { display:none; }
+  .add-menu button {
+    background:#fff; color: var(--navy);
+    border: 2px solid var(--border); padding: 10px 14px;
+    border-radius: 8px; font-size: 14px; font-weight: 600;
+    text-align:left; justify-content:flex-start;
+  }
+  .add-menu button:hover { border-color: var(--navy); background:#fafafa; }
 </style>
 </head>
 <body>
@@ -221,6 +284,22 @@
     <div class="big">Click to choose, or drag &amp; drop</div>
     <div class="small">Up to 5 Pokémon images · PNG / JPG / WebP</div>
   </label>
+
+  <div class="or-row">
+    <span class="line"></span><span class="or">OR</span><span class="line"></span>
+  </div>
+  <div class="cam-launch">
+    <button id="camOpen" class="secondary" type="button">📷 Use camera</button>
+  </div>
+
+  <div class="cam-panel" id="camPanel">
+    <video id="camVideo" autoplay playsinline muted></video>
+    <div class="cam-actions">
+      <button id="camCapture" class="primary" type="button">Capture</button>
+      <button id="camStop" class="secondary" type="button">Stop camera</button>
+      <span class="info" id="camInfo">Captured: 0 / 5</span>
+    </div>
+  </div>
 
   <div class="controls">
     <button id="go" class="primary" disabled>
@@ -253,6 +332,14 @@ const errEl   = document.getElementById('err');
 const MAX     = 5;
 let files = [];
 
+const camOpenBtn    = document.getElementById('camOpen');
+const camPanel      = document.getElementById('camPanel');
+const camVideo      = document.getElementById('camVideo');
+const camCaptureBtn = document.getElementById('camCapture');
+const camStopBtn    = document.getElementById('camStop');
+const camInfo       = document.getElementById('camInfo');
+let camStream = null;
+
 const confColor = p => p >= 0.8 ? 'var(--green)' : p >= 0.5 ? 'var(--amber)' : 'var(--rose)';
 
 function showError(msg) {
@@ -270,12 +357,15 @@ function renderEmpty() {
 
 function setFiles(list) {
   const arr = Array.from(list).filter(f => f.type.startsWith('image/'));
-  files = arr.slice(0, MAX);
+  const trimmed = arr.slice(0, MAX);
+  const overflow = arr.length > MAX;
+  files = trimmed;
   countEl.textContent = `${files.length} file${files.length===1?'':'s'} selected`;
   goBtn.disabled = files.length === 0;
   clearBtn.disabled = files.length === 0;
-  showError(arr.length > MAX ? `Only the first ${MAX} images will be used.` : '');
+  showError(overflow ? `Only the first ${MAX} images will be used.` : '');
   renderPreviews();
+  if (typeof updateCamInfo === 'function') updateCamInfo();
 }
 
 function renderPreviews() {
@@ -291,17 +381,46 @@ function renderPreviews() {
     `;
     grid.appendChild(card);
   });
+  if (files.length < MAX) {
+    const addCard = document.createElement('div');
+    addCard.className = 'card add-card';
+    addCard.innerHTML = `
+      <button class="add-btn" type="button" aria-label="Add more">+</button>
+      <div class="add-menu" hidden>
+        <button type="button" data-act="file">📁 From files</button>
+        <button type="button" data-act="cam">📷 From camera</button>
+      </div>
+    `;
+    const menu = addCard.querySelector('.add-menu');
+    addCard.querySelector('.add-btn').addEventListener('click', e => {
+      e.stopPropagation();
+      menu.hidden = !menu.hidden;
+    });
+    menu.addEventListener('click', e => {
+      const btn = e.target.closest('button[data-act]');
+      if (!btn) return;
+      e.stopPropagation();
+      menu.hidden = true;
+      if (btn.dataset.act === 'file') fileEl.click();
+      else startCamera();
+    });
+    document.addEventListener('click', () => { menu.hidden = true; }, { once: true });
+    grid.appendChild(addCard);
+  }
 }
 
 drop.addEventListener('click', () => fileEl.click());
-fileEl.addEventListener('change', e => setFiles(e.target.files));
+fileEl.addEventListener('change', e => {
+  setFiles([...files, ...Array.from(e.target.files)]);
+  fileEl.value = '';
+});
 ['dragenter','dragover'].forEach(ev => drop.addEventListener(ev, e => {
   e.preventDefault(); drop.classList.add('dragover');
 }));
 ['dragleave','drop'].forEach(ev => drop.addEventListener(ev, e => {
   e.preventDefault(); drop.classList.remove('dragover');
 }));
-drop.addEventListener('drop', e => setFiles(e.dataTransfer.files));
+drop.addEventListener('drop', e => setFiles([...files, ...Array.from(e.dataTransfer.files)]));
 
 clearBtn.addEventListener('click', () => {
   files = []; fileEl.value = '';
@@ -309,7 +428,57 @@ clearBtn.addEventListener('click', () => {
   goBtn.disabled = true; clearBtn.disabled = true;
   showError('');
   renderEmpty();
+  updateCamInfo();
 });
+
+function updateCamInfo() {
+  camInfo.textContent = `Captured: ${files.length} / ${MAX}`;
+  camCaptureBtn.disabled = files.length >= MAX;
+}
+
+async function startCamera() {
+  if (camStream) return;
+  try {
+    camStream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: 'environment' }, audio: false
+    });
+    camVideo.srcObject = camStream;
+    camPanel.classList.add('show');
+    updateCamInfo();
+    showError('');
+  } catch (err) {
+    showError('Could not access camera: ' + (err.message || err.name));
+  }
+}
+
+function stopCamera() {
+  if (camStream) {
+    camStream.getTracks().forEach(t => t.stop());
+    camStream = null;
+  }
+  camVideo.srcObject = null;
+  camPanel.classList.remove('show');
+}
+
+function captureFrame() {
+  if (!camStream || files.length >= MAX) return;
+  const w = camVideo.videoWidth, h = camVideo.videoHeight;
+  if (!w || !h) { showError('Camera not ready yet, try again.'); return; }
+  const canvas = document.createElement('canvas');
+  canvas.width = w; canvas.height = h;
+  canvas.getContext('2d').drawImage(camVideo, 0, 0, w, h);
+  canvas.toBlob(blob => {
+    if (!blob) { showError('Failed to capture frame.'); return; }
+    const f = new File([blob], `camera-${Date.now()}.jpg`, { type: 'image/jpeg' });
+    setFiles([...files, f]);
+    updateCamInfo();
+  }, 'image/jpeg', 0.92);
+}
+
+camOpenBtn.addEventListener('click', startCamera);
+camStopBtn.addEventListener('click', stopCamera);
+camCaptureBtn.addEventListener('click', captureFrame);
+window.addEventListener('beforeunload', stopCamera);
 
 goBtn.addEventListener('click', async () => {
   goBtn.disabled = true; clearBtn.disabled = true;
