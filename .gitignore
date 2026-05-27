@@ -1,0 +1,12 @@
+# Python build artifacts
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# Large data + model artifacts (supplied separately — see webapp/README.md)
+Data/
+Models/
+
+# OS / editor cruft
+.DS_Store
