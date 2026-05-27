@@ -257,6 +257,52 @@
     text-align:left; justify-content:flex-start;
   }
   .add-menu button:hover { border-color: var(--navy); background:#fafafa; }
+
+  /* ---------- Team builder ---------- */
+  .section-divider { height:1px; background:var(--border); margin: 40px 0 28px; }
+  .team-head { display:flex; align-items:baseline; gap:12px; flex-wrap:wrap; margin-bottom: 6px; }
+  .team-head h2 { margin:0; font-size:24px; font-weight:800; color:var(--navy); }
+  .team-head .sub { margin:0; }
+  #teamSection[hidden] { display:none; }
+  .slot-grid {
+    display:grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+    gap: 16px; margin-top: 18px;
+  }
+  .team-slot { display:flex; flex-direction:column; gap:8px; }
+  .team-slot .slot-title {
+    font-weight:700; color:var(--navy); font-size:15px;
+    display:flex; justify-content:space-between; align-items:center;
+  }
+  .team-slot .slot-title .rm {
+    background:none; border:0; color:var(--muted); font-size:18px; padding:0 4px;
+    cursor:pointer; line-height:1;
+  }
+  .team-slot .slot-title .rm:hover { color:var(--rose); }
+  .fld { display:flex; flex-direction:column; gap:3px; }
+  .fld > span { font-size:11px; font-weight:600; color:var(--muted); text-transform:uppercase; letter-spacing:.5px; }
+  .team-slot input {
+    font-family:inherit; font-size:14px; padding:7px 9px;
+    border:2px solid var(--border); border-radius:8px; background:#fffdf3; color:var(--ink);
+    box-sizing:border-box; width:100%; min-width:0;
+  }
+  .team-slot input:focus { outline:none; border-color:var(--red); background:#fff; }
+  .moves-grid { display:grid; grid-template-columns:1fr 1fr; gap:6px; min-width:0; }
+  .reco-actions { display:flex; gap:12px; align-items:center; margin-top:20px; flex-wrap:wrap; }
+  .reco-card {
+    background: linear-gradient(180deg,#fff 0%, #fffaf0 100%);
+    border:2px solid var(--yellow); border-radius:16px; padding:18px;
+    box-shadow: var(--shadow); animation: fadeIn .35s ease both;
+  }
+  .reco-card.alt { border-color:var(--border); background:#fff; }
+  .reco-card .rc-species { font-size:20px; font-weight:800; color:var(--navy); }
+  .reco-card .rc-meta { color:#555; font-size:14px; margin-top:6px; }
+  .reco-card .rc-meta b { color:var(--navy); }
+  .reco-card .rc-moves { display:flex; flex-wrap:wrap; gap:6px; margin-top:10px; }
+  .reco-card .chip {
+    background:#fef3e0; border:1px solid var(--border); border-radius:999px;
+    padding:4px 12px; font-size:13px; font-weight:600; color:var(--ink);
+  }
+  .reco-card .rc-rank { font-size:12px; font-weight:700; color:var(--muted); letter-spacing:.5px; }
 </style>
 </head>
 <body>
@@ -273,7 +319,7 @@
     </div>
   </header>
 
-  <label class="drop" id="drop">
+  <div class="drop" id="drop">
     <input id="file" type="file" accept="image/*" multiple hidden>
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
          stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
@@ -283,7 +329,7 @@
     </svg>
     <div class="big">Click to choose, or drag &amp; drop</div>
     <div class="small">Up to 5 Pokémon images · PNG / JPG / WebP</div>
-  </label>
+  </div>
 
   <div class="or-row">
     <span class="line"></span><span class="or">OR</span><span class="line"></span>
@@ -316,6 +362,27 @@
       <div>Pick some Pokémon images to get started.</div>
     </div>
   </div>
+
+  <section id="teamSection" hidden>
+    <div class="section-divider"></div>
+    <div class="team-head">
+      <h2>Build your team</h2>
+      <p class="sub">Confirm or edit your 5 Pokémon, then predict the ideal 6th teammate.</p>
+    </div>
+    <div class="slot-grid" id="teamSlots"></div>
+    <div class="reco-actions">
+      <button id="reco" class="primary" type="button">
+        <span id="recoLabel">✨ Recommend 6th Pokémon</span>
+      </button>
+      <span class="info" id="recoInfo"></span>
+    </div>
+    <div id="recoResult" class="grid" style="margin-top:18px"></div>
+  </section>
+
+  <datalist id="dlSpecies"></datalist>
+  <datalist id="dlAbility"></datalist>
+  <datalist id="dlItem"></datalist>
+  <datalist id="dlMove"></datalist>
 
   <footer>Running locally · model: best_model_v3.pth</footer>
 </main>
@@ -420,7 +487,10 @@ fileEl.addEventListener('change', e => {
 ['dragleave','drop'].forEach(ev => drop.addEventListener(ev, e => {
   e.preventDefault(); drop.classList.remove('dragover');
 }));
-drop.addEventListener('drop', e => setFiles([...files, ...Array.from(e.dataTransfer.files)]));
+drop.addEventListener('drop', e => {
+  const dropped = e.dataTransfer ? Array.from(e.dataTransfer.files) : [];
+  if (dropped.length) setFiles([...files, ...dropped]);
+});
 
 clearBtn.addEventListener('click', () => {
   files = []; fileEl.value = '';
@@ -530,7 +600,162 @@ function renderResults(results) {
     `;
     grid.appendChild(card);
   });
+  maybeBuildTeam(results);
 }
+
+/* ---------------- Team builder + 6th-Pokémon recommendation ---------------- */
+const teamSection = document.getElementById('teamSection');
+const teamSlots   = document.getElementById('teamSlots');
+const recoBtn     = document.getElementById('reco');
+const recoLabel   = document.getElementById('recoLabel');
+const recoInfo    = document.getElementById('recoInfo');
+const recoResult  = document.getElementById('recoResult');
+
+let vocab = null;          // {species, ability, item, move}
+let speciesDefaults = {};  // {species: {ability, item, moves:[...]}}
+let transformerOK = false;
+
+function fillDatalist(id, items) {
+  document.getElementById(id).innerHTML =
+    items.map(v => `<option value="${v.replace(/"/g,'&quot;')}">`).join('');
+}
+
+async function loadVocab() {
+  try {
+    const res = await fetch('/vocab');
+    if (!res.ok) return;                 // 503 -> transformer disabled
+    vocab = await res.json();
+    fillDatalist('dlSpecies', vocab.species);
+    fillDatalist('dlAbility', vocab.ability);
+    fillDatalist('dlItem',    vocab.item);
+    fillDatalist('dlMove',    vocab.move);
+    transformerOK = true;
+    // Optional: per-species defaults to pre-fill slots (503 -> leave empty).
+    try {
+      const dres = await fetch('/defaults');
+      if (dres.ok) speciesDefaults = (await dres.json()).defaults || {};
+    } catch (_) {}
+  } catch (_) { /* leave disabled */ }
+}
+loadVocab();
+
+const esc = v => (v || '').replace(/"/g, '&quot;');
+
+function slotHtml(i, species) {
+  const sp = species || '';
+  // Prefill ability/item/moves from the species' most-common set (once, at
+  // creation). Slots stay fully editable afterward.
+  const d = (sp && speciesDefaults[sp]) || {};
+  const moves = d.moves || [];
+  const moveInput = n =>
+    `<input list="dlMove" data-f="move" value="${esc(moves[n])}" placeholder="Move ${n+1}">`;
+  return `
+    <div class="card team-slot" data-slot="${i}">
+      <div class="slot-title">Pokémon ${i+1}<button class="rm" type="button" title="Remove">×</button></div>
+      <label class="fld"><span>Species</span><input list="dlSpecies" data-f="species" value="${esc(sp)}" placeholder="Species"></label>
+      <label class="fld"><span>Ability</span><input list="dlAbility" data-f="ability" value="${esc(d.ability)}" placeholder="Ability"></label>
+      <label class="fld"><span>Item</span><input list="dlItem" data-f="item" value="${esc(d.item)}" placeholder="Item"></label>
+      <div class="fld"><span>Moves</span>
+        <div class="moves-grid">
+          ${moveInput(0)}
+          ${moveInput(1)}
+          ${moveInput(2)}
+          ${moveInput(3)}
+        </div>
+      </div>
+    </div>`;
+}
+
+function renderSlots(speciesList) {
+  teamSlots.innerHTML = speciesList.slice(0, 5).map((s, i) => slotHtml(i, s)).join('');
+  teamSlots.querySelectorAll('.rm').forEach(btn => btn.addEventListener('click', e => {
+    e.target.closest('.team-slot').remove();
+    renumberSlots();
+  }));
+}
+
+function renumberSlots() {
+  teamSlots.querySelectorAll('.team-slot').forEach((slot, i) => {
+    slot.dataset.slot = i;
+    slot.querySelector('.slot-title').childNodes[0].nodeValue = `Pokémon ${i+1}`;
+  });
+}
+
+async function maybeBuildTeam(results) {
+  if (!transformerOK) return;
+  recoResult.innerHTML = '';
+  // Map CNN top-1 labels to the transformer's species vocab.
+  const names = results.map(r => r.top3[0].name);
+  let mapped = {};
+  try {
+    const res = await fetch('/map_species', {
+      method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ names })
+    });
+    if (res.ok) mapped = (await res.json()).mapped || {};
+  } catch (_) {}
+  const speciesList = names.map(n => mapped[n] || '');
+  renderSlots(speciesList);
+  teamSection.hidden = false;
+  const unmatched = names.filter(n => !mapped[n]);
+  recoInfo.textContent = unmatched.length
+    ? `Couldn't auto-match: ${unmatched.join(', ')} — pick them manually.` : '';
+}
+
+function gatherTeam() {
+  const team = [];
+  teamSlots.querySelectorAll('.team-slot').forEach(slot => {
+    const get = f => {
+      const el = slot.querySelector(`input[data-f="${f}"]`);
+      return el ? el.value.trim() : '';
+    };
+    const species = get('species');
+    if (!species) return;                // skip empty slots
+    const moves = [...slot.querySelectorAll('input[data-f="move"]')]
+      .map(el => el.value.trim()).filter(Boolean);
+    team.push({ species, ability: get('ability'), item: get('item'), moves });
+  });
+  return team;
+}
+
+function recoCard(c, rank) {
+  const moves = (c.moves || []).map(m => `<span class="chip">${m}</span>`).join('');
+  const rankLabel = rank === 0 ? '★ Best pick' : `Alternative #${rank}`;
+  return `
+    <div class="reco-card ${rank ? 'alt' : ''}">
+      <div class="rc-rank">${rankLabel}</div>
+      <div class="rc-species">${c.species}</div>
+      <div class="rc-meta">Ability: <b>${c.ability}</b> &nbsp;·&nbsp; Item: <b>${c.item}</b></div>
+      <div class="rc-moves">${moves}</div>
+    </div>`;
+}
+
+recoBtn.addEventListener('click', async () => {
+  const team = gatherTeam();
+  if (!team.length) { recoInfo.textContent = 'Add at least one Pokémon (species required).'; return; }
+  recoBtn.disabled = true;
+  recoLabel.innerHTML = '<span class="spinner"></span> Thinking…';
+  recoResult.innerHTML = '';
+  try {
+    const res = await fetch('/recommend', {
+      method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ team })
+    });
+    if (!res.ok) {
+      const j = await res.json().catch(() => ({}));
+      recoInfo.textContent = j.detail || `Server error (HTTP ${res.status})`;
+      return;
+    }
+    const data = await res.json();
+    recoInfo.textContent = '';
+    recoResult.innerHTML = (data.candidates || []).map((c, i) => recoCard(c, i)).join('');
+  } catch (err) {
+    recoInfo.textContent = 'Network error: ' + err.message;
+  } finally {
+    recoLabel.textContent = '✨ Recommend 6th Pokémon';
+    recoBtn.disabled = false;
+  }
+});
 </script>
 </body>
 </html>

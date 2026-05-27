@@ -1,6 +1,6 @@
 # Pokémon Classifier — Web App
 
-A small **local-only** FastAPI site for the v3 EfficientNet-B0 model (95.6% top-1 on 150 Gen-I Pokémon). Drop in up to 5 images, get the predicted Pokémon for each with top-3 confidences.
+A small **local-only** FastAPI site for the v3 EfficientNet-B0 model (95.6% top-1 on 150 Gen-I Pokémon). Drop in up to 5 images, get the predicted Pokémon for each with top-3 confidences — then **confirm/edit the 5 Pokémon and have the masked-team transformer predict the ideal 6th teammate** (full set: species + ability + item + 4 moves).
 
 ![stack](https://img.shields.io/badge/stack-FastAPI%20+%20vanilla%20JS-ee1515) ![model](https://img.shields.io/badge/model-EfficientNet--B0-ffcb05?labelColor=1a1a2e)
 
@@ -10,19 +10,28 @@ A small **local-only** FastAPI site for the v3 EfficientNet-B0 model (95.6% top-
 
 ```
 webapp/
-├── app.py             # FastAPI server (GET /, POST /predict, /docs)
-├── model_utils.py     # Model load, eval transforms, top-3 prediction
+├── app.py             # FastAPI server (GET /, POST /predict, /vocab, /defaults, /map_species, /recommend, /docs)
+├── model_utils.py     # CNN load, eval transforms, top-3 prediction
+├── team_transformer.py# Masked-team transformer inference (TeamPredictor)
 ├── static/
 │   └── index.html     # Pokédex-themed UI (HTML + inline CSS + vanilla JS)
 ├── requirements.txt
 └── README.md          # this file
 ```
 
-**Backend** — loads `../Gen-I Pokemon/best_model_v3.pth` once at startup, exposes `POST /predict` that takes 1–5 image files and returns `{filename, top3: [{name, confidence}]}` for each.
+**Backend** — at startup loads the CNN (`../Gen-I Pokemon/best_model_v3.pth`) and, if its
+artifacts are present, the masked-team transformer (`../Models/masked_team_transformer.pt`
+plus the RDV vectors in `../Data/Transformer Ready Vectors/`). `POST /predict` classifies
+1–5 images; `/vocab`, `/map_species`, and `/recommend` power the team builder. **The
+classifier works even if the transformer artifacts are missing** — the team-builder UI just
+stays hidden in that case.
 
 **Frontend** — single-page UI with:
 - Drag-and-drop or click-to-pick image upload (max 5).
 - Per-image card with the thumbnail, a confidence-colored top-1 badge (green ≥80%, amber 50–80%, red <50%), and a top-3 bar chart.
+- A **team builder** that appears after classification: 5 editable slots pre-filled with the
+  classified species, with type-ahead fields for species/ability/item/4 moves, and a
+  **"Recommend 6th Pokémon"** button that renders the best pick plus alternatives.
 - Clear button, loading spinner, friendly empty/error states.
 
 ---
@@ -113,6 +122,49 @@ curl -X POST http://localhost:8000/predict \
   -F "files=@path/to/charizard.jpg"
 ```
 
+### Team-transformer endpoints
+These require the transformer artifacts (below); they return `503` if those are missing.
+
+- **`GET /vocab`** → `{species:[...], ability:[...], item:[...], move:[...]}` for the editable fields.
+- **`GET /defaults`** → `{defaults: {species: {ability, item, moves:[4]}}}` — the most-common ability/item/4-move set per species, aggregated from the scraped team pools. Used to **pre-fill** (not lock) the editable slots; the user can still change every field.
+- **`POST /map_species`** — body `{"names": ["Charizard", ...]}` → `{"mapped": {"Charizard": "Charizard", ...}}` (value `null` when no vocab match).
+- **`POST /recommend`** — body `{"team": [{"species","ability","item","moves":[...]}, ... up to 5]}` →
+  ```json
+  { "candidates": [ {"species":"Garchomp","ability":"Rough Skin","item":"Sitrus Berry","moves":["Earthquake","Dragon Claw","Rock Slide","Protect"]}, ... ] }
+  ```
+  Predictions are constrained to legal abilities/moves/items for the chosen species and to valid team rules (no duplicates, no double-Mega, Mega-stone enforcement).
+
+### Required artifacts for the recommendation feature
+
+> ⚠️ **These files are NOT in the repo.** `Data/` and `Models/` are git-ignored (they're
+> large — ~450 MB — and are shared out-of-band). Download them from the team's shared drive
+> and drop them into the **repo root** (next to the `webapp/` and `Gen-I Pokemon/` folders)
+> so the paths below resolve:
+
+```
+Pokemon_picture_to_strategy/
+├── Models/
+│   └── masked_team_transformer.pt          # trained checkpoint (config + vocabs)
+├── Data/
+│   ├── Transformer Ready Vectors/
+│   │   ├── pokemon_vectors.pkl              # raw-data vectors (species/item/move)
+│   │   ├── item_vectors.pkl
+│   │   └── move_vectors.pkl
+│   └── Scraped Pokemon Teams/
+│       └── *.pkl                           # team pools for per-species defaults (/defaults)
+├── webapp/
+└── Gen-I Pokemon/
+```
+
+- `Models/masked_team_transformer.pt` + the three `Transformer Ready Vectors/*.pkl` are
+  **required** for `/recommend`, `/vocab`, and `/defaults`.
+- `Data/Scraped Pokemon Teams/*.pkl` is **optional** — if absent the app still runs, the team
+  slots just aren't pre-filled with default sets.
+
+If the required artifacts are absent, the startup log prints
+`Team transformer unavailable, recommend-6th disabled: …` and the site runs as a pure
+classifier.
+
 ---
 
 ## Troubleshooting
@@ -131,8 +183,7 @@ curl -X POST http://localhost:8000/predict \
 ## What's intentionally out of scope
 
 - **No authentication, no HTTPS, no deployment** — this is a localhost demo.
-- **No persistence** — uploaded images live in memory only.
-- **No team-builder / 6th-Pokémon recommendation** — that logic stays in `../Gen-I Pokemon/team_recommender.ipynb`.
+- **No persistence** — uploaded images and team edits live in memory only.
 - **No TTA at inference** — single forward pass for low latency; the v3 weights are strong enough on their own.
 
 ---
